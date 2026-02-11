@@ -1,4 +1,4 @@
-docker run -d --name densentn \
+docker run -d --name m2i \
   --gpus '"device=0,2"' \
   --ipc=host --shm-size=8g \
   --ulimit memlock=-1 --ulimit stack=67108864 \
@@ -7,5 +7,5 @@ docker run -d --name densentn \
   -v /mnt/scsi_nas/env-predict/training_interactive:/data/training_interactive \
   -v /mnt/scsi_nas/env-predict/relation_gt:/data/relation_gt \
   -v /mnt/scsi_nas/env-predict/output:/data/output \
-  expl0i/m2i:cu111 \
+  expl0i/m2i:cu111u20 \
   tail -f /dev/null
