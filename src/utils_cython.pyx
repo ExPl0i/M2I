@@ -20,18 +20,22 @@ cdef:
     float M_PI = 3.14159265358979323846
     int pixel_num_1m = 4
 
+
 cdef int get_round(float a):
     if a > 0:
         return int(a + 0.5)
     else:
         return -int(fabs(a) + 0.5)
 
+
 cdef np.float32_t get_dis_point(np.float32_t a, np.float32_t b):
     return sqrt(a * a + b * b)
+
 
 cdef np.float32_t get_point_for_ratio(np.ndarray[np.float32_t, ndim=1] point, np.ndarray[np.float32_t, ndim=1] end,
                                       np.float32_t ratio, int c):
     return point[c] * (1.0 - ratio) + end[c] * ratio
+
 
 def _normalize(np.ndarray[np.float32_t, ndim=2] polygon, np.float32_t angle, np.float32_t center_point_y):
     cdef np.float32_t cos_, sin_, min_sqr_dis, temp
@@ -48,16 +52,20 @@ def _normalize(np.ndarray[np.float32_t, ndim=2] polygon, np.float32_t angle, np.
         min_sqr_dis = min(min_sqr_dis, new_points[i, 0] * new_points[i, 0] + temp * temp)
     return new_points, min_sqr_dis
 
+
 def normalize(polygon, cent_x, cent_y, angle, center_point):
     polygon[:, 0] -= cent_x
     polygon[:, 1] -= cent_y
     return _normalize(polygon, angle, center_point[1])
 
+
 cdef np.float32_t get_sqr_dis_point(np.float32_t a, np.float32_t b):
     return a * a + b * b
 
+
 def get_rotate_lane_matrix(lane_matrix, x, y, angle):
     return _get_rotate_lane_matrix(lane_matrix, x, y, angle)
+
 
 def _get_rotate_lane_matrix(np.ndarray[np.float32_t, ndim=2] lane_matrix, np.float32_t x, np.float32_t y, np.float32_t angle):
     cdef np.float32_t sin_, cos_, dx, dy
@@ -74,14 +82,18 @@ def _get_rotate_lane_matrix(np.ndarray[np.float32_t, ndim=2] lane_matrix, np.flo
             res[r, i * 2 + 1] = dx * sin_ + dy * cos_
     return res
 
+
 cdef np.float32_t get_rand(np.float32_t l, np.float32_t r):
     cdef np.float32_t t = rand()
     return l + t / RAND_MAX * (r - l)
 
+
 cdef int get_rand_int(int l, int r):
     return l + rand() % (r - l + 1)
 
+
 args = None
+
 
 def _get_roads(decoded_example, normalizer, args):
     cdef:
@@ -95,13 +107,17 @@ def _get_roads(decoded_example, normalizer, args):
         np.ndarray[np.float32_t, ndim=2] dir = decoded_example['roadgraph_samples/dir'].numpy()
         np.ndarray[int, ndim=1] type = decoded_example['roadgraph_samples/type'].numpy().reshape(-1).astype(np.int32)
         np.ndarray[int, ndim=1] valid = decoded_example['roadgraph_samples/valid'].numpy().reshape(-1).astype(np.int32)
-        np.ndarray[int, ndim=1] id = decoded_example['roadgraph_samples/id'].numpy().reshape(-1).astype(np.int32)
+
+        # IMPORTANT: keep ids as int64 (do NOT cast to int32) to avoid overflow/negatives
+        np.ndarray[np.int64_t, ndim=1] id = decoded_example['roadgraph_samples/id'].numpy().reshape(-1).astype(np.int64)
 
         np.ndarray[np.float32_t, ndim=1] traffic_light_x = decoded_example['traffic_light_state/current/x'].numpy().reshape(-1)
         np.ndarray[np.float32_t, ndim=1] traffic_light_y = decoded_example['traffic_light_state/current/y'].numpy().reshape(-1)
         np.ndarray[int, ndim=1] traffic_light_state = decoded_example['traffic_light_state/current/state'].numpy().reshape(-1).astype(np.int32)
         np.ndarray[int, ndim=1] traffic_light_valid = decoded_example['traffic_light_state/current/valid'].numpy().reshape(-1).astype(np.int32)
-        np.ndarray[int, ndim=1] traffic_light_id = decoded_example['traffic_light_state/current/id'].numpy().reshape(-1).astype(np.int32)
+
+        # IMPORTANT: keep as int64 (matches tfexample) so comparisons don’t break
+        np.ndarray[np.int64_t, ndim=1] traffic_light_id = decoded_example['traffic_light_state/current/id'].numpy().reshape(-1).astype(np.int64)
 
         np.ndarray[int, ndim=1] lane_id_2_length = np.zeros(max_lane_num, dtype=np.int32)
         np.ndarray[int, ndim=2] lane_id_2_point_ids = np.zeros([max_lane_num, max_point_num], dtype=np.int32)
@@ -129,6 +145,15 @@ def _get_roads(decoded_example, normalizer, args):
         # early_fuse
         int do_early_fuse = 0
 
+        # NEW: remap raw lane ids -> compact [0..lane_num_used)
+        dict lane_id_map
+        int lane_num_used = 0
+        np.ndarray[np.int64_t, ndim=1] lane_index_to_id
+        int lane_idx
+        long long lane_key
+
+    lane_id_map = {}
+    lane_index_to_id = np.zeros(max_lane_num, dtype=np.int64)
 
     if 'raster' in args.other_params:
         do_raster = 1
@@ -156,11 +181,22 @@ def _get_roads(decoded_example, normalizer, args):
                         goals_2D[goals_2D_len, 0], goals_2D[goals_2D_len, 1] = xyz[i, 0], xyz[i, 1]
                         goals_2D_len += 1
 
-            lane_id = id[i]
-            assert 0 <= lane_id and lane_id < max_lane_num
-            assert lane_id_2_length[lane_id] < max_point_num
-            lane_id_2_point_ids[lane_id, lane_id_2_length[lane_id]] = i
-            lane_id_2_length[lane_id] += 1
+            # NEW: remap raw lane_id to compact index lane_idx
+            lane_key = <long long>id[i]
+            lane_idx = lane_id_map.get(lane_key, -1)
+            if lane_idx == -1:
+                lane_idx = lane_num_used
+                if lane_idx >= max_lane_num:
+                    continue  # too many lanes; skip extras
+                lane_id_map[lane_key] = lane_idx
+                lane_index_to_id[lane_idx] = id[i]
+                lane_num_used += 1
+
+            if lane_id_2_length[lane_idx] >= max_point_num:
+                continue  # lane too long; clip extra points
+
+            lane_id_2_point_ids[lane_idx, lane_id_2_length[lane_idx]] = i
+            lane_id_2_length[lane_idx] += 1
 
     cdef:
         int length, stride, start, cur, t, c
@@ -219,7 +255,9 @@ def _get_roads(decoded_example, normalizer, args):
     if 'stride_10_2' in args.other_params:
         stride = 10
         scale = 0.03
-    for i in range(max_lane_num):
+
+    # NEW: iterate only over lanes actually used (compact indices)
+    for i in range(lane_num_used):
         length = lane_id_2_length[i]
         start = len_vectors
         if length > 0:
@@ -229,9 +267,11 @@ def _get_roads(decoded_example, normalizer, args):
                     now = lane_id_2_point_ids[i, j]
                     x_int = _raster_float_to_int(xyz[now, 0], 0, raster_scale)
                     y_int = _raster_float_to_int(xyz[now, 1], 1, raster_scale)
-                    assert 0 <= type[now] < 20
-                    if _in_image(x_int, y_int):
-                        image[x_int, y_int, 40 + type[now]] = 1
+
+                    # NEW: avoid crashing on unexpected type values
+                    if 0 <= type[now] < 20:
+                        if _in_image(x_int, y_int):
+                            image[x_int, y_int, 40 + type[now]] = 1
 
                 if 'tf_raster' in args.other_params:
                     for j in range(num_traffic_lights):
@@ -284,8 +324,9 @@ def _get_roads(decoded_example, normalizer, args):
 
                 cur = 30
                 if type[now] != -1:
-                    assert type[now] < 20
-                    vectors[len_vectors, cur + type[now]] = 1.0
+                    # NEW: guard instead of assert
+                    if 0 <= type[now] < 20:
+                        vectors[len_vectors, cur + type[now]] = 1.0
 
                 cur = 40
                 vectors[len_vectors, cur + 0] = j
@@ -299,7 +340,8 @@ def _get_roads(decoded_example, normalizer, args):
                     for k in range(num_traffic_lights):
                         # Add traffic light info controlling the lane.
                         # Assume a lane can only be controlled by one traffic light.
-                        if traffic_light_valid[k] and (0 <= traffic_light_state[k] < 9) and traffic_light_id[k] == i:
+                        # NEW: traffic_light_id is raw lane id; compare with lane_index_to_id[i]
+                        if traffic_light_valid[k] and (0 <= traffic_light_state[k] < 9) and traffic_light_id[k] == lane_index_to_id[i]:
                             vectors[len_vectors, cur + 0] = traffic_light_x[k] * scale
                             vectors[len_vectors, cur + 1] = traffic_light_y[k] * scale
                             vectors[len_vectors, cur + 2 + traffic_light_state[k]] = 1
@@ -327,10 +369,12 @@ def _get_roads(decoded_example, normalizer, args):
 
     return vectors, polyline_spans, len_vectors, polyline_num, goals_2D, goals_2D_len, lanes
 
+
 def get_roads(decoded_example, normalizer, args):
     vectors, polyline_spans, len_vectors, polyline_num, goals_2D, goals_2D_len, lanes = \
         _get_roads(decoded_example, normalizer, args)
     return vectors[:len_vectors].copy(), polyline_spans[:polyline_num].copy(), goals_2D[:goals_2D_len].copy(), lanes
+
 
 def _get_traffic_lights(decoded_example, normalizer, args):
     cdef:
@@ -379,8 +423,10 @@ def _get_traffic_lights(decoded_example, normalizer, args):
                 traffic_light_vectors[i, j, 2 + traffic_light_state[i, j]] = 1
     return traffic_light_vectors
 
+
 def get_traffic_lights(decoded_example, normalizer, args):
     return _get_traffic_lights(decoded_example, normalizer, args)
+
 
 cdef int _raster_float_to_int(float a, int is_y, float scale):
     if not is_y:
@@ -388,14 +434,18 @@ cdef int _raster_float_to_int(float a, int is_y, float scale):
     else:
         return int(a * scale + 10000 + 0.5) - 10000 + 56
 
+
 def raster_float_to_int(a, is_y, scale):
     return _raster_float_to_int(a, is_y, scale)
+
 
 cdef int _in_image(int x, int y):
     return 0 <= x < 224 and 0 <= y < 224
 
+
 def in_image(x, y):
     return _in_image(x, y)
+
 
 cdef float _raster_int_to_float(int a, int is_y, float scale):
     if not is_y:
@@ -403,8 +453,10 @@ cdef float _raster_int_to_float(int a, int is_y, float scale):
     else:
         return (a - 56) / scale
 
+
 def raster_int_to_float(a, is_y, scale):
     return _raster_int_to_float(a, is_y, scale)
+
 
 def _get_agents(gt_trajectory_, gt_future_is_valid_, tracks_type_, visualize, args, gt_influencer_traj_, prediction_scores_):
     cdef:
@@ -475,7 +527,7 @@ def _get_agents(gt_trajectory_, gt_future_is_valid_, tracks_type_, visualize, ar
                         else:
                             image[x, y, j + 20] = 1
 
-        if 'train_reactor' in args.other_params and 'raster_inf' in args.other_params and do_raster and i==1:
+        if 'train_reactor' in args.other_params and 'raster_inf' in args.other_params and do_raster and i == 1:
             if gt_influencer_traj_ is not None:
                 # add a new influencer info
                 if 'gt_influencer_traj' in args.other_params:
@@ -499,7 +551,7 @@ def _get_agents(gt_trajectory_, gt_future_is_valid_, tracks_type_, visualize, ar
                     for pred_idx in range(num_of_pred):
                         for j in range(time_frames):
                             current_time_frame = j + history_frame_num
-                            if args.do_eval or  gt_future_is_valid[i, current_time_frame]:
+                            if args.do_eval or gt_future_is_valid[i, current_time_frame]:
                                 x = _raster_float_to_int(gt_influencer_traj_[pred_idx, current_time_frame, 0], 0, raster_scale)
                                 y = _raster_float_to_int(gt_influencer_traj_[pred_idx, current_time_frame, 1], 1, raster_scale)
                                 if _in_image(x, y):
@@ -538,9 +590,11 @@ def _get_agents(gt_trajectory_, gt_future_is_valid_, tracks_type_, visualize, ar
 
     return vectors, polyline_spans, len_vectors, polyline_num, trajs
 
+
 def get_agents(gt_trajectory, gt_future_is_valid, tracks_type, visualize, args, gt_influencer_traj=None, prediction_scores=None):
     vectors, polyline_spans, len_vectors, polyline_num, trajs = _get_agents(gt_trajectory, gt_future_is_valid, tracks_type, visualize, args, gt_influencer_traj, prediction_scores)
     return vectors[:len_vectors].copy(), polyline_spans[:polyline_num].copy(), trajs
+
 
 def _get_normalized(np.ndarray[np.float32_t, ndim=3] polygons, np.float32_t x, np.float32_t y, np.float32_t angle):
     cdef:
@@ -558,6 +612,7 @@ def _get_normalized(np.ndarray[np.float32_t, ndim=3] polygons, np.float32_t x, n
             new_polygons[polygon_idx, i, 1] = polygons[polygon_idx, i, 0] * sin_ + polygons[polygon_idx, i, 1] * cos_
     return new_polygons
 
+
 def get_normalized(trajectorys, normalizer, reverse=False):
     if trajectorys.dtype is not np.float32:
         trajectorys = trajectorys.astype(np.float32)
@@ -565,6 +620,7 @@ def get_normalized(trajectorys, normalizer, reverse=False):
     if reverse:
         return _get_normalized(trajectorys, normalizer.origin[0], normalizer.origin[1], -normalizer.yaw)
     return _get_normalized(trajectorys, normalizer.x, normalizer.y, normalizer.yaw)
+
 
 def get_normalized_points(points: np.ndarray, normalizer, reverse=False):
     if points.dtype is not np.float32:
@@ -575,12 +631,14 @@ def get_normalized_points(points: np.ndarray, normalizer, reverse=False):
         return _get_normalized(trajectorys, normalizer.origin[0], normalizer.origin[1], -normalizer.yaw)[0]
     return _get_normalized(trajectorys, normalizer.x, normalizer.y, normalizer.yaw)[0]
 
+
 cdef:
     np.float32_t speed_lower_bound = 1.4, speed_upper_bound = 11.0, speed_scale_lower = 0.5, speed_scale_upper = 1.0
 
     np.float32_t lateral_miss_threshold_3 = 1.0, longitudinal_miss_threshold_3 = 2.0
     np.float32_t lateral_miss_threshold_5 = 1.8, longitudinal_miss_threshold_5 = 3.6
     np.float32_t lateral_miss_threshold_8 = 3.0, longitudinal_miss_threshold_8 = 6.0
+
 
 cdef np.float32_t _speed_scale_factor(np.float32_t speed):
     cdef:
@@ -594,8 +652,10 @@ cdef np.float32_t _speed_scale_factor(np.float32_t speed):
         fraction = (speed - speed_lower_bound) / (speed_upper_bound - speed_lower_bound)
         return speed_scale_lower + (speed_scale_upper - speed_scale_lower) * fraction
 
+
 def speed_scale_factor(speed):
     return _speed_scale_factor(speed)
+
 
 cdef int _is_true_positive(np.ndarray[np.float32_t, ndim=2] disps, np.float32_t speed, int time, np.float32_t delta_heading):
     cdef:
@@ -631,11 +691,13 @@ cdef int _is_true_positive(np.ndarray[np.float32_t, ndim=2] disps, np.float32_t 
 
     return miss == 0
 
+
 def is_true_positive(points, gt_point, speed, time, headings, normalizer):
     heading = headings[time - 1]
     delta_heading = -normalizer.yaw - heading
     disps = (points - gt_point[np.newaxis, :]).astype(np.float32)
     return _is_true_positive(disps, speed, time, delta_heading)
+
 
 def _classify_track(np.ndarray[int, ndim=1] gt_future_is_valid, np.ndarray[np.float32_t, ndim=2] gt_trajectory):
     # warning: gt_trajectory must not norm
@@ -694,6 +756,7 @@ def _classify_track(np.ndarray[int, ndim=1] gt_future_is_valid, np.ndarray[np.fl
         return 'LEFT_U_TURN'
     return 'LEFT_TURN'
 
+
 def _tnt_square_filter(np.ndarray[np.float32_t, ndim=2] goals_2D,
                        np.ndarray[np.float32_t, ndim=1] scores,
                        args):
@@ -701,7 +764,7 @@ def _tnt_square_filter(np.ndarray[np.float32_t, ndim=2] goals_2D,
         int n = goals_2D.shape[0]
         int i, j, width = 100, x, y, m = 0
         float cent_x = 0.0, cent_y = 30.0, eps = 1e-6
-        np.ndarray[float, ndim = 2] heatmap = np.ones((width, width), dtype=np.float32)
+        np.ndarray[float, ndim=2] heatmap = np.ones((width, width), dtype=np.float32)
 
     for i in range(n):
         x = get_round(goals_2D[i, 0] - cent_x) + width // 2
@@ -729,8 +792,10 @@ def _tnt_square_filter(np.ndarray[np.float32_t, ndim=2] goals_2D,
 
     return goals_2D, scores
 
+
 def tnt_square_filter(goals_2D, scores, args):
     return _tnt_square_filter(goals_2D, scores, args)
+
 
 @cython.boundscheck(True)
 def _tnt_square_combine(np.ndarray[np.float32_t, ndim=2] goals_2D,
@@ -741,7 +806,7 @@ def _tnt_square_combine(np.ndarray[np.float32_t, ndim=2] goals_2D,
     cdef:
         int i, j, k = 0, n = goals_2D.shape[0], m = goals_2D_oppo.shape[0]
         np.ndarray[np.float32_t, ndim=2] goals_4D = np.zeros((n * m, 4), dtype=np.float32)
-        np.ndarray[np.float32_t, ndim = 1] product_scores = np.zeros((n * m), dtype=np.float32)
+        np.ndarray[np.float32_t, ndim=1] product_scores = np.zeros((n * m), dtype=np.float32)
 
     if is_oppo:
         for j in range(m):
@@ -760,6 +825,7 @@ def _tnt_square_combine(np.ndarray[np.float32_t, ndim=2] goals_2D,
 
     return goals_4D, product_scores
 
+
 def tnt_square_combine(goals_2D, scores, goals_2D_oppo, scores_oppo, is_oppo=False, max_each=None):
     if max_each is not None:
         def get(goals_2D, scores):
@@ -775,14 +841,17 @@ def tnt_square_combine(goals_2D, scores, goals_2D_oppo, scores_oppo, is_oppo=Fal
     scores_oppo = np.exp(scores_oppo)
     return _tnt_square_combine(goals_2D, scores, goals_2D_oppo, scores_oppo, is_oppo)
 
+
 def classify_track(gt_future_is_valid, gt_trajectory_not_norm):
     return _classify_track(gt_future_is_valid.astype(np.int32), gt_trajectory_not_norm)
+
 
 cdef int may_collide(np.ndarray[np.float32_t, ndim=1] a, np.ndarray[np.float32_t, ndim=1] b):
     if get_dis_point(a[0] - b[0], a[1] - b[1]) < 3.0:
         return True
     else:
         return False
+
 
 cdef int may_collide_traj(np.ndarray[np.float32_t, ndim=2] a, np.ndarray[np.float32_t, ndim=2] b):
     cdef int i
@@ -792,6 +861,7 @@ cdef int may_collide_traj(np.ndarray[np.float32_t, ndim=2] a, np.ndarray[np.floa
             return True
 
     return False
+
 
 @cython.boundscheck(True)
 def _colli_det(np.ndarray[np.float32_t, ndim=2] goals_4D, np.ndarray[np.float32_t, ndim=1] joint_scores, normalizer, normalizer_o,
@@ -819,6 +889,7 @@ def _colli_det(np.ndarray[np.float32_t, ndim=2] goals_4D, np.ndarray[np.float32_
             joint_scores[i] = 0
 
     return joint_scores
+
 
 def colli_det(goals_4D, joint_scores, normalizer, normalizer_o, trajs, trajs_o):
     return _colli_det(goals_4D, joint_scores, normalizer, normalizer_o, trajs, trajs_o)

@@ -5,11 +5,11 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 
-import structs
-import utils_cython
-from modeling.lib import PointSubGraph, GlobalGraphRes, CrossAttention, GlobalGraph, MLP
+from .. import structs
+from .. import utils_cython
+from .lib import PointSubGraph, GlobalGraphRes, CrossAttention, GlobalGraph, MLP
 
-import utils, globals
+from .. import utils, globals
 
 
 class DecoderRes(nn.Module):

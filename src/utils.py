@@ -24,7 +24,7 @@ from matplotlib.path import Path
 from matplotlib.pyplot import MultipleLocator
 from torch import Tensor
 
-import globals, utils_cython, structs
+from . import globals, utils_cython, structs
 
 _False = False
 if _False:

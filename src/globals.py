@@ -1,6 +1,6 @@
 from typing import Optional
 
-from structs import *
+from .structs import *
 
 interactive_single_traj_waymo_pred: Optional[WaymoPred] = None
 

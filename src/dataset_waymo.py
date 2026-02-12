@@ -9,11 +9,11 @@ import tensorflow as tf
 import torch
 from tqdm import tqdm
 
-import globals, structs, utils, utils_cython
+from . import globals, structs, utils, utils_cython
 
 tqdm = partial(tqdm, dynamic_ncols=True)
 
-from waymo_tutorial import _parse
+from .waymo_tutorial import _parse
 from waymo_open_dataset.protos import motion_submission_pb2
 
 from collections import defaultdict

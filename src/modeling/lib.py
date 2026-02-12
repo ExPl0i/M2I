@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 
-import utils
+from .. import utils
 
 
 class LayerNorm(nn.Module):

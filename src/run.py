@@ -30,8 +30,8 @@ def compile_pyx_files():
 # Comment out this line if pyx files have been compiled manually.
 compile_pyx_files()
 
-import utils, structs, globals
-from modeling.vectornet import VectorNet
+from . import utils, structs, globals
+from .modeling.vectornet import VectorNet
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -176,7 +176,7 @@ def eval_one_epoch(model, iter_bar, optimizer, device, args: utils.Args, i_epoch
 
     import tensorflow as tf
     global tf
-    from waymo_tutorial import MotionMetrics, metrics_config, metric_names
+    from .waymo_tutorial import MotionMetrics, metrics_config, metric_names
 
     motion_metrics = MotionMetrics(metrics_config)
 
@@ -424,7 +424,7 @@ def demo_basic(rank, world_size, kwargs, queue, queue2):
     args.reuse_temp_file = True
 
     if args.waymo:
-        from dataset_waymo import Dataset
+        from .dataset_waymo import Dataset
         train_dataset = Dataset(args, args.train_batch_size, rank=rank, to_screen=False)
         train_sampler = train_dataset
         train_dataloader = train_dataset
@@ -462,7 +462,7 @@ def run(args):
 
     print("Loading dataset", args.data_dir)
     if args.waymo:
-        from dataset_waymo import Dataset
+        from .dataset_waymo import Dataset
     if args.distributed_training:
         queue = mp.Manager().Queue()
         # queue2 is specifically used for saving results when eval

@@ -5,9 +5,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 
-from modeling.decoder import Decoder, DecoderResCat
-from modeling.lib import MLP, GlobalGraph, LayerNorm, SubGraph, CrossAttention, GlobalGraphRes
-import utils
+from .decoder import Decoder, DecoderResCat
+from .lib import MLP, GlobalGraph, LayerNorm, SubGraph, CrossAttention, GlobalGraphRes
+from .. import utils
 
 
 class RelationNetwork(nn.Module):
