@@ -4,7 +4,9 @@ docker run -d --name m2i \
   --ulimit memlock=-1 --ulimit stack=67108864 \
   --cap-add=IPC_LOCK \
   -v /mnt/scsi_nas/waymo_datasets/motion_v_1_3_1/uncompressed/tf_example/training:/data/training \
+  -v /mnt/scsi_nas/waymo_datasets/motion_v_1_3_1/uncompressed/tf_example/validation:/data/validation \
   -v /mnt/scsi_nas/env-predict/training_interactive:/data/training_interactive \
+  -v /mnt/scsi_nas/env-predict/validation_interactive:/data/validation_interactive \
   -v /mnt/scsi_nas/env-predict/relation_gt:/data/relation_gt \
   -v /mnt/scsi_nas/env-predict/output:/data/output \
   expl0i/m2i:cu111u20 \
