@@ -257,8 +257,16 @@ def eval_one_epoch(model, iter_bar, optimizer, device, args: utils.Args, i_epoch
 
         if 'train_relation' not in args.other_params:
             motion_metrics.args = args
+            pred_traj_for_metric = pred_trajectory
+            
+            if hasattr(pred_traj_for_metric, "ndim") and pred_traj_for_metric.ndim == 5:
+                if pred_traj_for_metric.shape[1] == args.mode_num and pred_traj_for_metric.shape[2] == 2:
+                    pred_traj_for_metric = pred_traj_for_metric[:, :, 0]   
+                else:
+                    pred_traj_for_metric = pred_traj_for_metric[:, 0]      
+
             motion_metrics.update_state(
-                tf.convert_to_tensor(pred_trajectory[:, 0].astype(np.float32)),
+                tf.convert_to_tensor(pred_traj_for_metric.astype(np.float32)),
                 tf.convert_to_tensor(pred_score.astype(np.float32)),
                 *metric_params
             )
@@ -277,10 +285,12 @@ def eval_one_epoch(model, iter_bar, optimizer, device, args: utils.Args, i_epoch
                 file_path_1 = args.eval_exp_path + number_str + '.pickle'
             file_path_2 = file_path_1
             print('saving merged result with ', len(list(merged_eval_rst.keys())), ' scenarios', ' at \n', file_path_1, '\n' ,file_path_2)
+            out_dir = os.path.dirname(file_path_1)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
             with open(file_path_1, 'wb') as f:
                 pickle.dump(merged_eval_rst, f, pickle.HIGHEST_PROTOCOL)
-                structs.save(obj=merged_eval_rst, output_dir=args.output_dir,
-                             eval_identifier=file_path_2)
+                structs.save(obj=merged_eval_rst, output_dir=args.output_dir, eval_identifier=os.path.basename(file_path_2))
         else:
             rst_save_queue.put(eval_rst_to_save)
 

@@ -356,7 +356,7 @@ def init(args_: Args, logger_):
             setattr(args, key, config[key])
 
     if args.do_eval:
-        assert os.path.exists(args.output_dir)
+        os.makedirs(args.output_dir, exist_ok=True)
         if args.waymo:
             pass
         else:

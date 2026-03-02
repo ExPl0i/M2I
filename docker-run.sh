@@ -9,5 +9,5 @@ docker run -d --name m2i \
   -v /mnt/scsi_nas/env-predict/validation_interactive:/data/validation_interactive \
   -v /mnt/scsi_nas/env-predict/relation_gt:/data/relation_gt \
   -v /mnt/scsi_nas/env-predict/output:/data/output \
-  expl0i/m2i:cu111u20 \
+  expl0i/m2i:cu111u20v2 \
   tail -f /dev/null

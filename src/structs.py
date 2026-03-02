@@ -6,9 +6,16 @@ import numpy as np
 
 
 def save(obj, output_dir, eval_identifier, prefix=None):
+    import os
     struct = obj.__class__.__name__
     prefix = f'{prefix}.{struct}' if prefix is not None else struct
-    with open(os.path.join(output_dir, f'{prefix}.{eval_identifier}'), 'wb') as f:
+
+    safe_id = os.path.basename(str(eval_identifier))
+
+    path = os.path.join(output_dir, f'{prefix}.{safe_id}')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    with open(path, 'wb') as f:
         pickle.dump(obj, f)
 
 
