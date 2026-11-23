@@ -1,21 +1,62 @@
-FROM nvidia/cuda:11.1.1-cudnn8-runtime-ubuntu18.04
+FROM nvidia/cuda:11.1.1-cudnn8-runtime-ubuntu20.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# --- System deps + Python 3.6 (matching repo env) ---
+# --- System deps + build Python 3.6.15 from source ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3.6 python3.6-dev python3-pip \
-      build-essential \
-      git ca-certificates \
+      build-essential git curl ca-certificates \
+      libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+      libffi-dev liblzma-dev libncursesw5-dev libgdbm-dev uuid-dev tk-dev \
       libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Make `python` point to Python 3.6
-RUN ln -sf /usr/bin/python3.6 /usr/bin/python && \
-    ln -sf /usr/bin/python3.6 /usr/bin/python3
+# --- Download/build Python (IPv4 + retries + mirror/GitHub fallback) ---
+ARG PYTHON_VERSION=3.6.15
+RUN set -eux; \
+    PYTGZ="Python-${PYTHON_VERSION}.tgz"; \
+    URL1="https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTGZ}"; \
+    URL2="https://www.mirrorservice.org/sites/www.python.org/ftp/python/${PYTHON_VERSION}/${PYTGZ}"; \
+    URL3="https://github.com/python/cpython/archive/refs/tags/v${PYTHON_VERSION}.tar.gz"; \
+    rm -f "/tmp/${PYTGZ}" /tmp/cpython.tgz; \
+    fetch() { \
+      url="$1"; out="$2"; \
+      i=1; \
+      while [ "$i" -le 8 ]; do \
+        if curl -4fsSL --connect-timeout 20 --retry 0 "$url" -o "$out"; then \
+          return 0; \
+        fi; \
+        sleep 2; \
+        i=$((i+1)); \
+      done; \
+      return 1; \
+    }; \
+    (fetch "$URL1" "/tmp/${PYTGZ}" || true); \
+    if [ ! -s "/tmp/${PYTGZ}" ]; then \
+      (fetch "$URL2" "/tmp/${PYTGZ}" || true); \
+    fi; \
+    if [ -s "/tmp/${PYTGZ}" ]; then \
+      tar -xzf "/tmp/${PYTGZ}" -C /tmp; \
+    else \
+      fetch "$URL3" /tmp/cpython.tgz; \
+      tar -xzf /tmp/cpython.tgz -C /tmp; \
+      mv "/tmp/cpython-${PYTHON_VERSION}" "/tmp/Python-${PYTHON_VERSION}"; \
+    fi; \
+    cd "/tmp/Python-${PYTHON_VERSION}"; \
+    ./configure --prefix=/usr/local --enable-optimizations --with-ensurepip=install; \
+    make -j"$(nproc)"; \
+    make altinstall; \
+    cd /; \
+    rm -rf "/tmp/Python-${PYTHON_VERSION}" "/tmp/${PYTGZ}" /tmp/cpython.tgz
+
+# Make `python` / `python3` point to Python 3.6
+RUN ln -sf /usr/local/bin/python3.6 /usr/local/bin/python && \
+    ln -sf /usr/local/bin/python3.6 /usr/local/bin/python3
+
+# pip на Python 3.6: фиксируем версии и отключаем кэш флагом, а не ENV
+RUN python -m ensurepip --upgrade && \
+    python -m pip install --no-cache-dir --upgrade "pip<22" "setuptools<60" wheel
 
 # --- Clone repo ---
 ARG REPO_URL="https://github.com/ExPl0i/M2I.git"
@@ -26,18 +67,15 @@ RUN git clone --depth 1 --branch "${REPO_BRANCH}" "${REPO_URL}" /workspace/M2I
 WORKDIR /workspace/M2I
 
 # --- Python deps (pip equivalent of conda.cuda111.yaml) ---
-RUN python -m pip install --upgrade pip setuptools wheel && \
-    # PyTorch + CUDA 11.1 wheels
-    python -m pip install \
+RUN python -m pip install --no-cache-dir --upgrade "pip<22" "setuptools<60" wheel && \
+    python -m pip install --no-cache-dir \
       torch==1.8.1+cu111 torchvision==0.9.1+cu111 \
       -f https://download.pytorch.org/whl/torch_stable.html && \
-    # Core scientific stack (pinned)
-    python -m pip install \
+    python -m pip install --no-cache-dir \
       numpy==1.19.2 scipy==1.5.4 \
       numba==0.53.1 llvmlite==0.36.0 \
       numpy-quaternion==2021.4.5.14.42.35 && \
-    # Repo requirements (+ pinned from conda yaml)
-    python -m pip install \
+    python -m pip install --no-cache-dir \
       cython==0.29.21 tqdm==4.60.0 matplotlib==3.3.4 \
       tensorflow-gpu==2.4.0 tensorflow-estimator==2.4.0 \
       tensorboard==2.5.0 tensorboard-data-server==0.6.1 tensorboard-plugin-wit==1.8.0 \
