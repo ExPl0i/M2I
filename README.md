@@ -1,3 +1,33 @@
+# M2I: ответвление для дипломного проекта env-predict
+
+Ответвление репозитория [Tsinghua-MARS-Lab/M2I](https://github.com/Tsinghua-MARS-Lab/M2I) для дипломного проекта [env-predict](https://github.com/ExPl0i/env-predict). Здесь используется для совместного прогноза траекторий пары взаимодействующих транспортных средств на части `validation_interactive` набора Waymo Open Motion Dataset v1.3.1. Описание авторов приведено ниже без изменений.
+
+## Изменения относительно оригинала
+
+- `Dockerfile`: образ на основе `nvidia/cuda:11.1.1-cudnn8-runtime-ubuntu20.04`. Python 3.6.15 собирается из исходников (в Ubuntu 20.04 нет пакета Python 3.6), загрузка архива повторяется при сбоях и при необходимости берется с зеркала или с GitHub. Версии pip ниже 22 и setuptools ниже 60 закреплены для совместимости с Python 3.6. Далее ставятся PyTorch 1.8.1 (CUDA 11.1), TensorFlow 2.4.0 и waymo-open-dataset-tf-2-4-0 1.3.0 с версиями библиотек из `conda.cuda111.yaml`; расширение Cython собирается при сборке образа.
+- `docker-run.sh`: запуск контейнера на двух видеокартах с подключением данных Waymo Open Motion Dataset и рабочих папок проекта.
+- Скрипты запуска этапов M2I:
+  - `predict-relation-run.sh`: прогноз отношения «влияющий – реагирующий» предобученной моделью авторов `m2i.relation.v2v` (эпоха 25);
+  - `predict-marginal-run.sh`: маргинальный прогноз влияющего участника моделью `waymo.densetnt.raster.vehicle.3`, обученной в проекте командой из раздела Training Marginal Predictor ниже; результат `influencer_pred_val.pickle`;
+  - `training-conditional-run.sh`: обучение условного предиктора реагирующего участника (пары «транспортное средство – транспортное средство», две видеокарты, размер пакета 32);
+  - `predcit-conditional-run.sh`: условный прогноз весами после эпохи 29, результат `my_conditional_run1.pickle`.
+- `src/run.py`: при оценке условного предиктора из пятимерного массива прогнозов берется нужное измерение перед расчетом метрик Waymo; папка для результатов создается автоматически.
+- `src/structs.py`, `src/utils.py`: сохранение результатов в папку, которой еще нет, и запуск оценки без заранее созданной выходной папки.
+
+## Порядок запуска
+
+1. Собрать образ: `docker build -t expl0i/m2i:cu111u20v2 .`
+2. Поправить пути к данным в `docker-run.sh` и запустить контейнер: `bash docker-run.sh`
+3. Внутри контейнера (`docker exec -it m2i bash`, папка `/workspace/M2I`) по очереди выполнить `predict-relation-run.sh`, `predict-marginal-run.sh`, `training-conditional-run.sh`, `predcit-conditional-run.sh`.
+
+Нужные файлы авторов (истинные отношения `training_interactive_gt_relations.pickle` и `validation_interactive_gt_relations.pickle`, предобученная модель отношений `m2i.relation.v2v`) скачиваются по ссылке на Google Drive из описания ниже.
+
+## Где хранятся веса и прогнозы
+
+Веса условного предиктора (эпохи 29 и 30) и прогнозы `my_conditional_run1.pickle` хранятся в приватном датасете [ExPl0i/env-predict-data](https://huggingface.co/datasets/ExPl0i/env-predict-data), набор `models`. Прогнозы импортированы в выгрузку веб-приложения (набор `ui_bundle_m2i`) под именем модели `m2i_conditional_1`.
+
+---
+
 # M2I: From Factored Marginal Trajectory Prediction to Interactive Prediction
 
 [Paper](https://arxiv.org/abs/2202.11884) [Project Page](https://tsinghua-mars-lab.github.io/M2I/)
